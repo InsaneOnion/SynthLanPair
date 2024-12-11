@@ -257,29 +257,38 @@ def unrotate2d(pts):
     finds principal axes of pts and gives a rotation matrix (2d)
     to realign the axes of max variance to x,y.
     """
-    mu = np.median(pts,axis=0)
-    pts -= mu[None,:]
-    l,R = np.linalg.eig(pts.T.dot(pts))
-    R = R / np.linalg.norm(R,axis=0)[None,:]
+    # Check for NaN or inf in pts
+    if np.any(np.isnan(pts)) or np.any(np.isinf(pts)):
+        print("Warning: pts contains NaN or inf values.")
+        return None
+
+    mu = np.median(pts, axis=0)
+    pts -= mu[None, :]
+    l, R = np.linalg.eig(pts.T.dot(pts))
+
+    # Check for NaN or inf in eigenvalues or eigenvectors
+    if np.any(np.isnan(l)) or np.any(np.isinf(l)) or np.any(np.isnan(R)) or np.any(np.isinf(R)):
+        print("Warning: Eigenvalues or eigenvectors contain NaN or inf values.")
+        return None
+
+    R = R / np.linalg.norm(R, axis=0)[None, :]
 
     # make R compatible with x-y axes:
-    if abs(R[0,0]) < abs(R[0,1]): #compare dot-products with [1,0].T
+    if abs(R[0, 0]) < abs(R[0, 1]):  # compare dot-products with [1,0].T
         R = np.fliplr(R)
-    if not np.allclose(np.linalg.det(R),1):
-        if R[0,0]<0:
-            R[:,0] *= -1
-        elif R[1,1]<0:
-            R[:,1] *= -1
+    if not np.allclose(np.linalg.det(R), 1):
+        if R[0, 0] < 0:
+            R[:, 0] *= -1
+        elif R[1, 1] < 0:
+            R[:, 1] *= -1
         else:
-            print ("Rotation matrix not understood")
-            return
-    if R[0,0]<0 and R[1,1]<0:
+            print("Rotation matrix not understood")
+            return None
+    if R[0, 0] < 0 and R[1, 1] < 0:
         R *= -1
-    assert np.allclose(np.linalg.det(R),1)
+    assert np.allclose(np.linalg.det(R), 1)
 
-    # at this point "R" is a basis for the original (rotated) points.
-    # we need to return the inverse to "unrotate" the points:
-    return R.T #return the inverse
+    return R.T  # return the inverse
 
 def unrotate2d_(pts):
     """

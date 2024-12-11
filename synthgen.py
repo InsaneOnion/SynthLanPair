@@ -441,6 +441,10 @@ class RendererV3(object):
         bb  : 2x4xn matrix of BB after perspective
         text: string of text -- for excluding symbols/punctuations.
         """
+        if bb0.size == 0 or bb.size == 0:
+            print("Warning: Empty bounding box array.")
+            return False
+
         h0 = np.linalg.norm(bb0[:,3,:] - bb0[:,0,:], axis=0)
         w0 = np.linalg.norm(bb0[:,1,:] - bb0[:,0,:], axis=0)
         hw0 = np.c_[h0,w0]
@@ -456,6 +460,11 @@ class RendererV3(object):
         alnum = np.array([ch.isalnum() for ch in text])
         hw0 = hw0[alnum,:]
         hw = hw[alnum,:]
+
+        if hw0.size == 0 or hw.size == 0:
+            # print(text)
+            print("Warning: No alphanumeric characters found.")
+            return False
 
         min_h0, min_h = np.min(hw0[:,0]), np.min(hw[:,0])
         asp0, asp = hw0[:,0]/hw0[:,1], hw[:,0]/hw[:,1]
