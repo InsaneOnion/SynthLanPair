@@ -235,6 +235,21 @@ def get_text_placement_mask(xyz,mask,plane,pad=2,viz=False):
         pts_fp.append(xyz[:,:2])
         pts.append(cnt_ij)
 
+    # 在调用minAreaRect之前检查pts_fp
+    if np.any(np.isnan(pts_fp[0])) or np.any(np.isinf(pts_fp[0])):
+        print("Invalid points for minAreaRect")
+        return
+
+    # 确保点集不为空且有效
+    if len(pts_fp[0]) < 3:  # 至少需要3个点来形成一个有效的矩形
+        print("Not enough points for minAreaRect")
+        return
+
+    # 检查点集的数值范围
+    if np.any(np.abs(pts_fp[0]) > 1e6):  # 设置一个合理的阈值
+        print("Points out of reasonable range")
+        return
+
     # unrotate in 2D plane:
     rect = cv2.minAreaRect(pts_fp[0].copy().astype('float32'))
     box = np.array(cv2.boxPoints(rect))
@@ -519,8 +534,60 @@ class RendererV3(object):
             # tgt_img.save('tgt_text.png')
 
         # update the collision mask with text:
-        collision_mask += (255 * (text_mask>0)).astype('uint8')
-        collision_mask_ += (255 * (text_mask_>0)).astype('uint8')
+        word_bb = self.char2wordBB(bb, text)
+        word_bb_ = self.char2wordBB(bb_, text_)
+
+        # collision_mask += (255 * (text_mask>0)).astype('uint8')
+        # collision_mask_ += (255 * (text_mask_>0)).astype('uint8')
+
+        # # 为源文本更新碰撞 mask
+        # for i in range(word_bb.shape[-1]):
+        #     word_bb_i = word_bb[:,:,i]
+        #     # 获取 bounding box 的四个角点坐标
+        #     x = word_bb_i[0,:]
+        #     y = word_bb_i[1,:]
+        #     # 创建多边形点集
+        #     pts = np.stack([x,y], axis=-1).astype(np.int32)
+        #     # 填充多边形区域
+        #     cv2.fillPoly(collision_mask, [pts], 255)
+
+        # # 为目标文本更新碰撞 mask  
+        # for i in range(word_bb_.shape[-1]):
+        #     word_bb_i = word_bb_[:,:,i]
+        #     x = word_bb_i[0,:]
+        #     y = word_bb_i[1,:]
+        #     pts = np.stack([x,y], axis=-1).astype(np.int32)
+        #     cv2.fillPoly(collision_mask_, [pts], 255)
+
+        # 为源文本更新碰撞 mask - 使用整段文本的 bounding box
+        if word_bb.shape[-1] > 0:  # 确保有文本
+            # 获取所有单词 box 的最外围坐标
+            x_min = np.min(word_bb[0,:,:])
+            x_max = np.max(word_bb[0,:,:])
+            y_min = np.min(word_bb[1,:,:])
+            y_max = np.max(word_bb[1,:,:])
+            
+            # 创建整段文本的四个角点
+            x = np.array([x_min, x_max, x_max, x_min])
+            y = np.array([y_min, y_min, y_max, y_max])
+            pts = np.stack([x,y], axis=-1).astype(np.int32)
+            # 填充多边形区域
+            cv2.fillPoly(collision_mask, [pts], 255)
+
+        # 为目标文本更新碰撞 mask
+        if word_bb_.shape[-1] > 0:  # 确保有文本
+            # 获取所有单词 box 的最外围坐标
+            x_min = np.min(word_bb_[0,:,:])
+            x_max = np.max(word_bb_[0,:,:])
+            y_min = np.min(word_bb_[1,:,:])
+            y_max = np.max(word_bb_[1,:,:])
+            
+            # 创建整段文本的四个角点
+            x = np.array([x_min, x_max, x_max, x_min])
+            y = np.array([y_min, y_min, y_max, y_max])
+            pts = np.stack([x,y], axis=-1).astype(np.int32)
+            # 填充多边形区域
+            cv2.fillPoly(collision_mask_, [pts], 255)
 
         collision_mask_img = Image.fromarray(collision_mask_)
         collision_mask_img.save('collision_mask_.png') 

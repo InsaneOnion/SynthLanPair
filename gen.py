@@ -43,7 +43,6 @@ def add_res_to_db(imgname,res,db):
     db['data'].create_dataset(dname,data=res[i]['img'])
     db['data'][dname].attrs['charBB'] = res[i]['charBB']
     db['data'][dname].attrs['wordBB'] = res[i]['wordBB']        
-    #db['data'][dname].attrs['txt'] = res[i]['txt']
     L = res[i]['txt']
     L = [n.encode("ascii", "ignore") for n in L]
     db['data'][dname].attrs['txt'] = L
@@ -142,13 +141,9 @@ def main(viz=False, no_db=False):
                             ninstance=INSTANCE_PER_IMAGE,viz=viz)
       if len(res) > 0:
           if no_db:
-            # 如果 no_db 为 True，则保存图片和标签
-            # save_image_and_labels(imname, res['src'], config["out_dir"] + "/src")
-            # save_image_and_labels(imname, res['tgt'], config["out_dir"] + "/tgt")
             save_image_and_labels(imname, res, config["out_dir"] + "/img")
             print("====================================================saved====================================================")
           else:
-            # 如果 no_db 为 False，则添加到数据库
             add_res_to_db(imname, res, out_db)
 
       if viz:
