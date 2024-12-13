@@ -54,11 +54,19 @@ def save_image_and_labels(imname, res, output_dir):
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
 
+    if not os.path.exists(output_dir + "/image_en"):
+        os.makedirs(output_dir + "/image_en")
+        os.makedirs(output_dir + "/label_en")
+
+    if not os.path.exists(output_dir + "/image_cn"):
+        os.makedirs(output_dir + "/image_cn")
+        os.makedirs(output_dir + "/label_cn")
+
     for i, result in enumerate(res):
         img = result['img']
         img_ = result['img_']
-        img_path = osp.join(output_dir, f"{imname}_{i}.jpg")
-        img_path_ = osp.join(output_dir, f"{imname}_{i}_.jpg")
+        img_path = osp.join(output_dir, f"image_en/{imname}_{i}.jpg")
+        img_path_ = osp.join(output_dir, f"image_cn/{imname}_{i}.jpg")
         # 保存图片
         Image.fromarray(img).save(img_path)
         Image.fromarray(img_).save(img_path_)
@@ -75,20 +83,19 @@ def save_image_and_labels(imname, res, output_dir):
             'txt_': [text for text in result['txt_']] 
         }
         # 保存标签为 JSON 文件
-        labels_path = osp.join(output_dir, f"{imname}_{i}.json")
-        labels_path_ = osp.join(output_dir, f"{imname}_{i}_.json")  
+        labels_path = osp.join(output_dir, f"label_en/{imname}_{i}.json")
+        labels_path_ = osp.join(output_dir, f"label_cn/{imname}_{i}.json")  
         with open(labels_path, 'w') as f:
             json.dump(labels, f)
         with open(labels_path_, 'w') as f:
             json.dump(labels_, f)
 
-def main(viz=False, no_db=False):
+def main(viz=False, db=False):
   config = CONFIG
   
-  if no_db:
-    out_dir = config['out_dir'] + "/img"
-    if not os.path.exists(out_dir):
-      os.makedirs(out_dir)
+  out_dir = config['out_dir'] + "/img"
+  if not os.path.exists(out_dir):
+    os.makedirs(out_dir)
 
   # open databases:
   print (colorize(Color.BLUE,'getting data..',bold=True))
@@ -98,9 +105,10 @@ def main(viz=False, no_db=False):
   seg_db = h5py.File(config['seg_db'],'r')
   print (colorize(Color.BLUE,'\t-> done',bold=True))
 
-  out_db = h5py.File(osp.join(outdir, 'SynthText.h5'),'w')
-  out_db.create_group('/data')
-  print (colorize(Color.GREEN,'Storing the output in: '+ config['out_dir'], bold=True))
+  if db:
+    out_db = h5py.File(osp.join(outdir, 'SynthText.h5'),'w')
+    out_db.create_group('/data')
+    print (colorize(Color.GREEN,'Storing the output in: '+ config['out_dir'], bold=True))
 
   # # get the names of the image files in the dataset:
   imnames = sorted(depth_db.keys())
@@ -140,7 +148,7 @@ def main(viz=False, no_db=False):
       res = RV3.render_text(img,depth,seg,area,label,
                             ninstance=INSTANCE_PER_IMAGE,viz=viz)
       if len(res) > 0:
-          if no_db:
+          if not db:
             save_image_and_labels(imname, res, config["out_dir"] + "/img")
             print("====================================================saved====================================================")
           else:
@@ -167,6 +175,6 @@ if __name__=='__main__':
   import argparse
   parser = argparse.ArgumentParser(description='Genereate Synthetic Scene-Text Images')
   parser.add_argument('--viz',action='store_true',dest='viz',default=False,help='flag for turning on visualizations')
-  parser.add_argument('--no_db', action='store_true', dest='no_db', default=False, help='flag to not store results in the database')
+  parser.add_argument('--db', action='store_true', dest='db', default=False, help='flag to not store results in the database')
   args = parser.parse_args()
-  main(args.viz, args.no_db)
+  main(args.viz, args.db)
