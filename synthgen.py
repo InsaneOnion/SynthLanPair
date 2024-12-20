@@ -79,8 +79,12 @@ class TextRegions(object):
             coords = np.c_[xs,ys].astype('float32')
             rect = cv2.minAreaRect(coords)          
             #box = np.array(cv2.cv.BoxPoints(rect))
+            # 四个顶点坐标(4, 2)
             box = np.array(cv2.boxPoints(rect))
             h,w,rot = TextRegions.get_hw(box,return_rot=True)
+
+            # if rot > 45:
+            # print(f"rot: {rot}")
 
             f = (h > TextRegions.minHeight 
                 and w > TextRegions.minWidth
@@ -205,6 +209,103 @@ def rescale_frontoparallel(p_fp,box_fp,p_im):
         s = 1.0
     return s
 
+def get_text_placement_mask_tmp(xyz,mask,plane,pad=2,viz=False):
+    """
+    Returns a binary mask in which text can be placed.
+    Also returns a homography from original image
+    to this rectified mask.
+
+    XYZ  : (HxWx3) image xyz coordinates
+    MASK : (HxW) : non-zero pixels mark the object mask
+    REGION : DICT output of TextRegions.get_regions
+    PAD : number of pixels to pad the placement-mask by
+    """
+    contour,hier = cv2.findContours(mask.copy().astype('uint8'),
+                                    mode=cv2.RETR_CCOMP,
+                                    method=cv2.CHAIN_APPROX_SIMPLE)[-2:]
+    contour = [np.squeeze(c).astype('float') for c in contour]
+    #plane = np.array([plane[1],plane[0],plane[2],plane[3]])
+    H,W = mask.shape[:2]
+
+    # bring the contour 3d points to fronto-parallel config:
+    pts,pts_fp = [],[]
+    center = np.array([W,H])/2
+    n_front = np.array([0.0,0.0,-1.0])
+    for i in range(len(contour)):
+        cnt_ij = contour[i]
+        xyz = su.DepthCamera.plane2xyz(center, cnt_ij, plane)
+        R = su.rot3d(plane[:3],n_front)
+        xyz = xyz.dot(R.T)
+        pts_fp.append(xyz[:,:2])
+        pts.append(cnt_ij)
+
+    # 在调用minAreaRect之前检查pts_fp
+    if np.any(np.isnan(pts_fp[0])) or np.any(np.isinf(pts_fp[0])):
+        print("Invalid points for minAreaRect")
+        return
+
+    # 确保点集不为空且有效
+    if len(pts_fp[0]) < 3:  # 至少需要3个点来形成一个有效的矩形
+        print("Not enough points for minAreaRect")
+        return
+
+    # 检查点集的数值范围
+    if np.any(np.abs(pts_fp[0]) > 1e6):  # 设置一个合理的阈值
+        print("Points out of reasonable range")
+        return
+
+    # unrotate in 2D plane:
+    rect = cv2.minAreaRect(pts_fp[0].copy().astype('float32'))
+    box = np.array(cv2.boxPoints(rect))
+    R2d = su.unrotate2d(box.copy())
+    box = np.vstack([box,box[0,:]]) #close the box for visualization
+
+    mu = np.median(pts_fp[0],axis=0)
+    pts_tmp = (pts_fp[0]-mu[None,:]).dot(R2d.T) + mu[None,:]
+    boxR = (box-mu[None,:]).dot(R2d.T) + mu[None,:]
+    
+    # rescale the unrotated 2d points to approximately
+    # the same scale as the target region:
+    s = rescale_frontoparallel(pts_tmp,boxR,pts[0])
+    boxR *= s
+    for i in range(len(pts_fp)):
+        pts_fp[i] = s*((pts_fp[i]-mu[None,:]).dot(R2d.T) + mu[None,:])
+
+    # paint the unrotated contour points:
+    minxy = -np.min(boxR,axis=0) + pad//2
+    ROW = np.max(ssd.pdist(np.atleast_2d(boxR[:,0]).T))
+    COL = np.max(ssd.pdist(np.atleast_2d(boxR[:,1]).T))
+
+    place_mask = 255*np.ones((int(np.ceil(COL))+pad, int(np.ceil(ROW))+pad), 'uint8')
+
+    pts_fp_i32 = [(pts_fp[i]+minxy[None,:]).astype('int32') for i in range(len(pts_fp))]
+    cv2.drawContours(place_mask,pts_fp_i32,-1,0,
+                     thickness=cv2.FILLED,
+                     lineType=8,hierarchy=hier)
+    
+    if not TextRegions.filter_rectified((~place_mask).astype('float')/255):
+        return
+
+    # calculate the homography
+    H,_ = cv2.findHomography(pts[0].astype('float32').copy(),
+                             pts_fp_i32[0].astype('float32').copy(),
+                             method=0)
+
+    Hinv,_ = cv2.findHomography(pts_fp_i32[0].astype('float32').copy(),
+                                pts[0].astype('float32').copy(),
+                                method=0)
+    if viz:
+        plt.subplot(1,2,1)
+        plt.imshow(mask)
+        plt.subplot(1,2,2)
+        plt.imshow(~place_mask)
+        for i in range(len(pts_fp_i32)):
+            plt.scatter(pts_fp_i32[i][:,0],pts_fp_i32[i][:,1],
+                        edgecolors='none',facecolor='g',alpha=0.5)
+        plt.show()
+
+    return place_mask,H,Hinv
+
 def get_text_placement_mask(xyz,mask,plane,pad=2,viz=False):
     """
     Returns a binary mask in which text can be placed.
@@ -216,6 +317,15 @@ def get_text_placement_mask(xyz,mask,plane,pad=2,viz=False):
     REGION : DICT output of TextRegions.get_regions
     PAD : number of pixels to pad the placement-mask by
     """
+    n = np.array([plane[0], plane[1], plane[2]])
+    if n[2] < 0:
+        n = -n
+    # 计算平面的旋转角度
+    angle_x = np.abs(np.arctan2(n[0], n[2])) * 180 / np.pi
+    angle_y = np.abs(np.arctan2(n[1], n[2])) * 180 / np.pi
+    if angle_x > 90 or angle_y > 90:
+        print(f"angle_x: {angle_x}, angle_y: {angle_y}")
+
     contour,hier = cv2.findContours(mask.copy().astype('uint8'),
                                     mode=cv2.RETR_CCOMP,
                                     method=cv2.CHAIN_APPROX_SIMPLE)[-2:]
@@ -378,15 +488,16 @@ def viz_textbb(fignum,text_im, bb_list,alpha=1.0):
 
 class RendererV3(object):
 
-    def __init__(self, data_dir, max_time=None):
-        self.text_renderer = tu.RenderFont(data_dir)
+    def __init__(self, data_dir, max_time=None, paired_text=False):
+        self.text_renderer = tu.RenderFont(data_dir, paired_text)
         self.colorizer = Colorize(data_dir)
         #self.colorizerV2 = colorV2.Colorize(data_dir)
 
         self.min_char_height = 8 #px
         self.min_asp_ratio = 0.4 #
 
-        self.max_text_regions = 7
+        # self.max_text_regions = 7
+        self.max_text_regions = 5
 
         self.max_time = max_time
 
@@ -753,9 +864,15 @@ class RendererV3(object):
 
             # process regions: 
             num_txt_regions = len(reg_idx)
-            NUM_REP = 5 # re-use each region three times:
+            NUM_REP = 10 # re-use each region three times:
+            # NUM_REP = 5 # re-use each region three times:
             reg_range = np.arange(NUM_REP * num_txt_regions) % num_txt_regions
+            placed_reg = set()
             for idx in reg_range:
+                if len(placed_reg) >= num_txt_regions:
+                    break
+                if idx in placed_reg:
+                    continue
                 ireg = reg_idx[idx]
                 try:
                     if self.max_time is None:
@@ -777,6 +894,7 @@ class RendererV3(object):
 
                 if txt_render_res is not None:
                     placed = True
+                    placed_reg.add(idx)
                     img,text,bb,collision_mask,img_,text_,bb_,collision_mask_ = txt_render_res
                     # update the region collision mask:
                     place_masks[ireg] = collision_mask

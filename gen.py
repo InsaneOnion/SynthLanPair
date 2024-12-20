@@ -118,7 +118,7 @@ def main(viz=False, db=False):
     NUM_IMG = N
   start_idx,end_idx = 0,min(NUM_IMG, N)
 
-  RV3 = RendererV3(config['data_dir'],max_time=SECS_PER_IMG)
+  RV3 = RendererV3(config['data_dir'],max_time=SECS_PER_IMG,paired_text=True)
   for i in range(start_idx,end_idx):
     imname = imnames[i]
     try:

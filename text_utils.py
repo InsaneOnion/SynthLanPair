@@ -82,7 +82,7 @@ class RenderFont(object):
         Also, outputs ground-truth bounding boxes and text string
     """
 
-    def __init__(self, data_dir='data'):
+    def __init__(self, data_dir='data', paired_text=False):
         # distribution over the type of text:
         # whether to get a single word, paragraph or a line:
         self.p_text = {0.0 : 'WORD',
@@ -104,7 +104,11 @@ class RenderFont(object):
         self.baselinestate = BaselineState()
 
         # text-source : gets english text:
-        self.text_source = TextSource(min_nchar=self.min_nchar,
+        if paired_text:
+            self.text_source = PairedTextSource(min_nchar=self.min_nchar,
+                                                fn=osp.join(data_dir,'pairedtext/en-zh.txt'))
+        else:
+            self.text_source = TextSource(min_nchar=self.min_nchar,
                                       fn=osp.join(data_dir,'newsgroup/newsgroup.txt'))
 
         # get font-state object:
@@ -564,13 +568,20 @@ class RenderFont(object):
 
             # sample text:
             text_type = sample_weighted(self.p_text)
-            text_a = self.text_source.sample(nline,nchar,text_type)
-            if len(text_a)==0 or np.any([len(line)==0 for line in text_a]):
-                continue
+            if isinstance(self.text_source, PairedTextSource):
+                text_a, text_b = self.text_source.sample(nline,nchar)
+                if text_a is None or text_b is None or len(text_a)==0 or np.any([len(line)==0 for line in text_a]) or len(text_b)==0 or np.any([len(line)==0 for line in text_b]):
+                    continue
+                # print("text_a: \n" + text_a + "\n=========")
+                # print("text_b: \n" + text_b + "\n=========")
+            else:
+                text_a = self.text_source.sample(nline,nchar,text_type)
+                if len(text_a)==0 or np.any([len(line)==0 for line in text_a]):
+                    continue
 
-            handled_text, ratio, centered = self.translator.handle_src_text(text_a)
-            text_b = self.translator.translate(handled_text)
-            text_b = self.translator.handle_tgt_text(text_b, ratio, centered)
+                handled_text, ratio, centered = self.translator.handle_src_text(text_a)
+                text_b = self.translator.translate(handled_text)
+                text_b = self.translator.handle_tgt_text(text_b, ratio, centered)
             # print("text_a: \n", text_a , "\n=========")
             # print("text_b: \n", text_b, "\n=========")
 
@@ -926,3 +937,175 @@ class TextSource(object):
             return '\n'.join(lines)
         else:
             return []
+
+
+class PairedTextSource(object):
+    """
+    从双语语料中提供配对的文本。
+    """
+    def __init__(self, min_nchar, fn):
+        """
+        min_nchar : 最小字符数
+        fn : 双语语料文件路径
+        """
+        self.min_nchar = min_nchar
+        self.translator = None
+
+        # 读取并解析双语语料
+        self.text_pairs = []
+        with open(fn, 'r', encoding='utf-8') as f:
+            lines = f.readlines()
+            for i in range(0, len(lines)-1, 2):
+                src = lines[i].strip()
+                tgt = lines[i+1].strip()
+                if src and tgt:  # 确保两行都不为空
+                    self.text_pairs.append((src, tgt))
+
+        # 概率分布参数
+        self.center_para = 0.5  # 居中对齐概率
+
+    def is_cjk(self, text):
+        """
+        检查文本是否包含 CJK 字符
+        """
+        # CJK 统一表意文字的范围
+        ranges = [
+            (0x4E00, 0x9FFF),   # CJK 统一表意文字
+            (0x3400, 0x4DBF),   # CJK 统一表意文字扩展 A
+            (0x20000, 0x2A6DF), # CJK 统一表意文字扩展 B
+            (0x2A700, 0x2B73F), # CJK 统一表意文字扩展 C
+            (0x2B740, 0x2B81F), # CJK 统一表意文字扩展 D
+            (0x2B820, 0x2CEAF), # CJK 统一表意文字扩展 E
+            (0x3000, 0x303F),   # CJK 符号和标点
+        ]
+        
+        for char in text:
+            for bottom, top in ranges:
+                if bottom <= ord(char) <= top:
+                    return True
+        return False
+
+    def get_text_width(self, text):
+        """
+        计算文本的显示宽度，考虑全角和半角字符
+        """
+        width = 0
+        for char in text:
+            if self.is_cjk(char) or ord(char) == 0x3000:  # CJK字符或全角空格
+                width += 2
+            else:
+                width += 1
+        return width
+
+    def check_symb_frac(self, txt, f=0.35):
+        """
+        检查特殊字符比例是否合适
+        """
+        return np.sum([not ch.isalnum() for ch in txt])/(len(txt)+0.0) <= f
+
+    def is_good(self, txt_pair, f=0.35):
+        """
+        检查文本对是否合适:
+        1. 不为空
+        2. 特殊字符比例合适
+        3. 长度大于最小字符数
+        4. 不全是特殊字符
+        """
+        src, tgt = txt_pair
+        
+        def is_txt(l):
+            char_ex = ['i','I','o','O','0','-']
+            chs = [ch in char_ex for ch in l]
+            return not np.all(chs)
+
+        return (len(src) > self.min_nchar and 
+                len(tgt) > self.min_nchar and
+                self.check_symb_frac(src, f) and 
+                self.check_symb_frac(tgt, f) and
+                is_txt(src) and is_txt(tgt))
+
+    # def center_align(self, lines):
+    #     """
+    #     对文本行进行居中对齐
+    #     """
+    #     ls = [len(l) for l in lines]
+    #     max_l = max(ls)
+    #     for i in range(len(lines)):
+    #         l = lines[i].strip()
+    #         dl = max_l-ls[i]
+    #         lspace = dl//2
+    #         rspace = dl-lspace
+    #         lines[i] = ' '*lspace+l+' '*rspace
+    #     return lines
+
+    def center_align(self, lines):
+        """
+        对文本行进行居中对齐，考虑 CJK 字符的全角特性
+        """
+        # 计算每行的显示宽度
+        widths = [self.get_text_width(l.strip()) for l in lines]
+        max_width = max(widths)
+        
+        aligned_lines = []
+        for i, line in enumerate(lines):
+            line = line.strip()
+            padding_width = max_width - widths[i]
+            
+            if self.is_cjk(line):
+                # padding_width *= 2
+                left_pad = padding_width // 2
+                right_pad = padding_width - left_pad
+            else:
+                left_pad = padding_width // 2
+                right_pad = padding_width - left_pad
+            pad_char = ' '
+                
+            aligned_line = pad_char * left_pad + line + pad_char * right_pad
+            aligned_lines.append(aligned_line)
+            
+        return aligned_lines
+
+    def sample_pair(self, nline_max, nchar_max, niter=100):
+        """
+        采样一对合适的文本
+        nline_max: 最大行数
+        nchar_max: 每行最大字符数
+        niter: 最大尝试次数
+        """
+        for _ in range(niter):
+            # 随机选择一对文本
+            idx = np.random.randint(len(self.text_pairs))
+            src, tgt = self.text_pairs[idx]
+            
+            # 检查行数
+            src_lines = src.split('\\n')
+            tgt_lines = tgt.split('\\n')
+            if len(src_lines) > nline_max or len(tgt_lines) > nline_max:
+                continue
+                
+            # 检查每行的长度
+            if any(len(line) > nchar_max for line in src_lines) or \
+               any(len(line) > nchar_max for line in tgt_lines):
+                continue
+                
+            # 检查文本质量
+            if self.is_good((src, tgt)):
+                # 如果需要居中对齐
+                if np.random.rand() < self.center_para:
+                    src_lines = self.center_align(src_lines)
+                    tgt_lines = self.center_align(tgt_lines)
+                    # print("center_align")
+                    # print(src_lines)
+                    # print(tgt_lines)
+                
+                return '\n'.join(src_lines), '\n'.join(tgt_lines)
+                
+        return None, None
+
+    def sample(self, nline_max, nchar_max):
+        """
+        采样接口函数
+        nline_max: 最大行数
+        nchar_max: 每行最大字符数
+        """
+        return self.sample_pair(nline_max, nchar_max)
