@@ -632,11 +632,11 @@ class RendererV3(object):
         font = self.text_renderer.font_state.sample()
         font = self.text_renderer.font_state.init_font(font)
 
-        render_res = self.text_renderer.render_sample(font,collision_mask)
+        render_res = self.text_renderer.render_sample(font,collision_mask, collision_mask_)
         if render_res is None: # rendering not successful
             return #None
         else:
-            text_mask, loc,bb,text = render_res['text_a']
+            text_mask, loc, bb, text = render_res['text_a']
             text_mask_, loc_, bb_, text_ = render_res['text_b']
             # visualize debug
             # src_img = Image.fromarray(text_mask)
@@ -734,10 +734,10 @@ class RendererV3(object):
         # tgt_img.save('tgt_text.png')
 
         im_final, im_final_ = self.colorizer.color(rgb.copy(), rgb_.copy(), [text_mask], [text_mask_], np.array([min_h]), np.array([min_h_]))
-        rgb_img = Image.fromarray(im_final)
-        rgb_img.save('rgb.png')
-        rgb_img_ = Image.fromarray(im_final_)
-        rgb_img_.save('rgb_.png')
+        # rgb_img = Image.fromarray(im_final)
+        # rgb_img.save('rgb.png')
+        # rgb_img_ = Image.fromarray(im_final_)
+        # rgb_img_.save('rgb_.png')
 
 
         return im_final, text, bb, collision_mask, im_final_, text_, bb_, collision_mask_   
