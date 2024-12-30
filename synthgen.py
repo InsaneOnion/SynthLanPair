@@ -636,7 +636,7 @@ class RendererV3(object):
         if render_res is None: # rendering not successful
             return #None
         else:
-            text_mask,loc,bb,text = render_res['text_a']
+            text_mask, loc,bb,text = render_res['text_a']
             text_mask_, loc_, bb_, text_ = render_res['text_b']
             # visualize debug
             # src_img = Image.fromarray(text_mask)

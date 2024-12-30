@@ -26,11 +26,16 @@ NUM_IMG = -1 # no. of images to use for generation (-1 to use all available):
 INSTANCE_PER_IMAGE = 1 # no. of times to use the same image
 SECS_PER_IMG = 5 #max time per image in seconds
 
-CONFIG = {'im_dir': '/home/czy/workspace/SynthText/data/bg_img',
-          'depth_db': '/home/czy/workspace/SynthText/data/depth.h5',
-          'seg_db': '/home/czy/workspace/SynthText/data/seg.h5',
+CONFIG = {
+          # 'im_dir': '/home/czy/workspace/SynthText/data/bg_img',
+          'im_dir': '/home/czy/workspace/SynthText/data/1w',
+          # 'depth_db': '/home/czy/workspace/SynthText/data/depth.h5',
+          'depth_db': '/home/czy/workspace/SynthText/prep_scripts/depth.h5',
+          # 'seg_db': '/home/czy/workspace/SynthText/data/seg.h5',
+          'seg_db': '/home/czy/workspace/SynthText/prep_scripts/seg_uint16.h5',
           'out_dir': '/home/czy/workspace/SynthText/data/results',
-          'data_dir': '/home/czy/workspace/SynthText/data/renderer_data'}
+          'data_dir': '/home/czy/workspace/SynthText/data/renderer_data'
+          }
 
 def add_res_to_db(imgname,res,db):
   """
@@ -129,7 +134,8 @@ def main(viz=False, db=False):
 
       # get depth:
       depth = depth_db[imname][:].T
-      depth = depth[:,:,0]
+      # print(depth.shape)
+      # depth = depth[:,:,0]
 
       # get segmentation:
       seg = seg_db['mask'][imname][:].astype('float32')
