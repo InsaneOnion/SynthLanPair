@@ -627,6 +627,12 @@ class RendererV3(object):
 
         # remove newlines and spaces:
         text = "".join(text.split())
+
+        if len(text) != bb.shape[-1]:
+            print(f"Text: {text}")
+            print(f"Text length: {len(text)}")
+            print(f"BB shape: {bb.shape}")
+
         assert len(text) == bb.shape[-1]
 
         alnum = np.array([ch.isalnum() for ch in text])
@@ -869,6 +875,65 @@ class RendererV3(object):
 
         return wordBB
 
+    def char2lineBB(self, charBB, text_list):
+        """
+        将字符级边界框转换为行级边界框
+
+        参数:
+        charBB : 2x4xn 矩阵,包含字符边界框坐标
+        text_list : 文本列表,每个元素可能包含换行符
+
+        返回:
+        lineBB : 2x4xm 矩阵,m为所有行数之和
+        line_texts : 包含每行文本内容的列表
+        text_index : 每行文本对应的原始文本索引
+        """
+        line_texts = []
+        text_index = []
+        char_counts = []
+
+        # 首先处理所有文本,分割成行并记录字符数
+        for idx, text in enumerate(text_list):
+            lines = text.split("\n")
+            for line in lines:
+                line_texts.append(line)
+                text_index.append(idx)
+                char_counts.append(sum(len(word) for word in line.strip().split()))
+
+        # 计算每行的起始字符索引
+        bb_idx = np.r_[0, np.cumsum(char_counts)]
+
+        # 为每行创建边界框
+        lineBB = np.zeros((2, 4, len(line_texts)), "float32")
+
+        for i in range(len(line_texts)):
+            # 获取当前行的所有字符边界框
+            cc = charBB[:, :, bb_idx[i] : bb_idx[i + 1]]
+
+            if cc.size == 0:  # 跳过空行
+                continue
+
+            # 将形状从 2x4xn_i 转换为 (4*n_i)x2
+            cc = np.squeeze(
+                np.concatenate(np.dsplit(cc, cc.shape[-1]), axis=1)
+            ).T.astype("float32")
+
+            # 使用最小面积矩形拟合
+            rect = cv2.minAreaRect(cc.copy())
+            box = np.array(cv2.boxPoints(rect))
+
+            # 找到与字符边界框对齐的box坐标排列
+            cc_tblr = np.c_[cc[0, :], cc[-3, :], cc[-2, :], cc[3, :]].T
+            perm4 = np.array(list(itertools.permutations(np.arange(4))))
+            dists = []
+            for pidx in range(perm4.shape[0]):
+                d = np.sum(np.linalg.norm(box[perm4[pidx], :] - cc_tblr, axis=1))
+                dists.append(d)
+
+            lineBB[:, :, i] = box[perm4[np.argmin(dists)], :].T
+
+        return lineBB, line_texts, text_index
+
     def render_text(self, rgb, depth, seg, area, label, ninstance=1, viz=False):
         """
         rgb   : HxWx3 image rgb values (uint8)
@@ -1009,14 +1074,108 @@ class RendererV3(object):
                 idict["img"] = img
                 idict["txt"] = itext
                 idict["charBB"] = np.concatenate(ibb, axis=2)
-                idict["wordBB"] = self.char2wordBB(
-                    idict["charBB"].copy(), " ".join(itext)
+                # idict["wordBB"] = self.char2wordBB(
+                #     idict["charBB"].copy(), " ".join(itext)
+                # )
+                # 添加行级边界框
+                idict["lineBB"], idict["line_texts"], idict["text_index"] = (
+                    self.char2lineBB(idict["charBB"].copy(), itext)
                 )
+                # print(itext)
+                # print(idict["lineBB"], idict["line_texts"], idict["text_index"])
                 idict["img_"] = img_
                 idict["txt_"] = itext_
                 idict["charBB_"] = np.concatenate(ibb_, axis=2)
-                idict["wordBB_"] = self.char2wordBB(
-                    idict["charBB_"].copy(), " ".join(itext_)
+                # idict["wordBB_"] = self.char2wordBB(
+                #     idict["charBB_"].copy(), " ".join(itext_)
+                # )
+                idict["lineBB_"], idict["line_texts_"], idict["text_index_"] = (
+                    self.char2lineBB(idict["charBB_"].copy(), itext_)
                 )
+                # print(itext)
+                # print(idict["line_texts"], idict["text_index"])
+                # print(idict["lineBB"].shape)
+                # print(itext_)
+                # print(idict["line_texts_"], idict["text_index_"])
+                # print(idict["lineBB_"].shape)
                 res.append(idict.copy())
         return res
+
+
+import os
+
+
+def viz_lineBB(img, lineBB, line_texts, text_index, save_path, color=(0, 255, 0)):
+    """
+    可视化行级边界框和文本
+
+    参数:
+    img : 原始图像
+    lineBB : 2x4xn 边界框矩阵
+    line_texts : 文本内容列表
+    text_index : 文本索引列表
+    save_path : 保存路径
+    color : 边界框颜色,默认绿色
+    """
+    img_viz = img.copy()
+    font = cv2.FONT_HERSHEY_SIMPLEX
+    font_scale = 0.8
+    thickness = 2
+
+    # 绘制每个边界框
+    for i in range(lineBB.shape[-1]):
+        # 获取边界框坐标
+        bb = lineBB[:, :, i]
+        bb = np.c_[bb, bb[:, 0]]  # 闭合边界框
+
+        # 转换为整数坐标
+        pts = np.array([[bb[0, j], bb[1, j]] for j in range(bb.shape[1])], np.int32)
+
+        # 绘制边界框
+        cv2.polylines(img_viz, [pts], True, color, thickness)
+
+        # 计算文本位置(边界框左上角)
+        text_pos = (int(np.min(bb[0, :])), int(np.min(bb[1, :])) - 10)
+
+        # 绘制文本内容和索引
+        text = f"{text_index[i]}: {line_texts[i]}"
+        cv2.putText(img_viz, text, text_pos, font, font_scale, color, thickness)
+
+    # 保存图像
+    # print(save_path)
+    cv2.imwrite(save_path, cv2.cvtColor(img_viz, cv2.COLOR_RGB2BGR))
+
+
+def save_visualization(imname, res, output_dir):
+    """
+    为每个结果保存可视化图像
+    """
+    if not os.path.exists(output_dir):
+        os.makedirs(output_dir)
+
+    viz_dir = os.path.join(output_dir, "visualization")
+    if not os.path.exists(viz_dir):
+        os.makedirs(viz_dir)
+
+    for i, result in enumerate(res):
+        # 源语言可视化
+        viz_path = os.path.join(viz_dir, f"{imname}_{i}_en_viz.jpg")
+        viz_lineBB(
+            result["img"],
+            result["lineBB"],
+            result["line_texts"],
+            result["text_index"],
+            viz_path,
+            color=(0, 255, 0),  # 绿色
+        )
+
+        # 目标语言可视化
+        viz_path = os.path.join(viz_dir, f"{imname}_{i}_cn_viz.jpg")
+        viz_lineBB(
+            result["img_"],
+            result["lineBB_"],
+            result["line_texts_"],
+            result["text_index_"],
+            viz_path,
+            color=(255, 0, 0),  # 红色
+        )

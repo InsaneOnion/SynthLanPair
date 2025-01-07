@@ -796,7 +796,8 @@ class FontState(object):
     """
 
     size = [50, 10]  # normal dist mean, std
-    underline = 0.05
+    # underline = 0.05
+    underline = 0.00
     strong = 0.5
     oblique = 0.2
     wide = 0.5
@@ -1140,6 +1141,9 @@ class PairedTextSource(object):
         # 概率分布参数
         self.center_para = 0.5  # 居中对齐概率
 
+        # 添加新的成员变量来追踪采样状态
+        self.current_indices = []
+
     def is_cjk(self, text):
         """
         检查文本是否包含 CJK 字符
@@ -1203,20 +1207,6 @@ class PairedTextSource(object):
             and is_txt(tgt)
         )
 
-    # def center_align(self, lines):
-    #     """
-    #     对文本行进行居中对齐
-    #     """
-    #     ls = [len(l) for l in lines]
-    #     max_l = max(ls)
-    #     for i in range(len(lines)):
-    #         l = lines[i].strip()
-    #         dl = max_l-ls[i]
-    #         lspace = dl//2
-    #         rspace = dl-lspace
-    #         lines[i] = ' '*lspace+l+' '*rspace
-    #     return lines
-
     def center_align(self, lines):
         """
         对文本行进行居中对齐，考虑 CJK 字符的全角特性
@@ -1231,7 +1221,6 @@ class PairedTextSource(object):
             padding_width = max_width - widths[i]
 
             if self.is_cjk(line):
-                # padding_width *= 2
                 left_pad = padding_width // 2
                 right_pad = padding_width - left_pad
             else:
@@ -1244,6 +1233,16 @@ class PairedTextSource(object):
 
         return aligned_lines
 
+    def get_next_index(self):
+        """获取下一个要使用的文本对索引"""
+        # 如果当前索引列表为空,重新生成一个打乱的索引列表
+        if not self.current_indices:
+            self.current_indices = list(range(len(self.text_pairs)))
+            random.shuffle(self.current_indices)
+
+        # 返回并移除列表中的最后一个索引
+        return self.current_indices.pop()
+
     def sample_pair(self, nline_max, nchar_max, niter=100):
         """
         采样一对合适的文本
@@ -1252,8 +1251,8 @@ class PairedTextSource(object):
         niter: 最大尝试次数
         """
         for _ in range(niter):
-            # 随机选择一对文本
-            idx = np.random.randint(len(self.text_pairs))
+            # 使用新的索引获取方法替代随机选择
+            idx = self.get_next_index()
             src, tgt = self.text_pairs[idx]
 
             # 检查行数
@@ -1274,9 +1273,6 @@ class PairedTextSource(object):
                 if np.random.rand() < self.center_para:
                     src_lines = self.center_align(src_lines)
                     tgt_lines = self.center_align(tgt_lines)
-                    # print("center_align")
-                    # print(src_lines)
-                    # print(tgt_lines)
 
                 return "\n".join(src_lines), "\n".join(tgt_lines)
 
